@@ -1,0 +1,14 @@
+# Godot
+.godot/
+*.import.tmp
+# Build output
+build/*
+!build/.gdignore
+# OS / editors
+Thumbs.db
+.DS_Store
+.vscode/
+node_modules/
+
+# Local review logs
+.revloop/
