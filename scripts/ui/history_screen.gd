@@ -6,7 +6,7 @@ const UiKit = preload("res://scripts/ui/ui_kit.gd")
 const NumberBoard = preload("res://scripts/ui/number_board.gd")
 
 var safe_margin := 0.03
-var _bg: ColorRect
+var _bg: TextureRect
 var _title: Label
 var _counts: Label
 var _hint: Label
@@ -17,8 +17,21 @@ var _board: NumberBoard
 func _ready() -> void:
 	UiKit.full_rect(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	_bg = ColorRect.new()
-	_bg.color = Color(0.03, 0.04, 0.08, 1.0)
+	# Same party palette as the 3D backdrop, kept dark so the numbers stay crisp.
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.05, 0.035, 0.13))
+	grad.set_color(1, Color(0.13, 0.04, 0.15))
+	grad.add_point(0.55, Color(0.08, 0.035, 0.15))
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.width = 8
+	tex.height = 256
+	tex.fill_from = Vector2(0.5, 0.0)
+	tex.fill_to = Vector2(0.5, 1.0)
+	_bg = TextureRect.new()
+	_bg.texture = tex
+	_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_bg.stretch_mode = TextureRect.STRETCH_SCALE
 	UiKit.full_rect(_bg)
 	add_child(_bg)
 	_title = UiKit.label("これまでに出た番号", 54, UiKit.ACCENT)

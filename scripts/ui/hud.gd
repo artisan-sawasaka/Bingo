@@ -39,6 +39,13 @@ func _ready() -> void:
 	_sub = UiKit.label("", 36, UiKit.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	_panel.add_child(_sub)
 	_status = UiKit.label("", 24, UiKit.MUTED)
+	# Dark pill behind the text: stays readable on the colorful party backdrop.
+	var pill := UiKit.panel_style(Color(0.03, 0.02, 0.08, 0.72), 18)
+	pill.content_margin_left = 16
+	pill.content_margin_right = 16
+	pill.content_margin_top = 4
+	pill.content_margin_bottom = 4
+	_status.add_theme_stylebox_override("normal", pill)
 	add_child(_status)
 	resized.connect(_layout)
 	_layout()
@@ -68,7 +75,7 @@ func _layout() -> void:
 	_sub.position = Vector2(0, panel_h - 110)
 	_sub.size = Vector2(w, 60)
 	_status.position = Vector2(m.x + 8, m.y)
-	_status.size = Vector2(s.x - PANEL_W - m.x * 2.0 - 30, 34)
+	_status.reset_size()  # pill hugs the text
 
 
 ## Normalized rect (0..1) of the free area for the 3D machine.
@@ -85,7 +92,8 @@ func machine_view_rect() -> Rect2:
 func set_status(text: String, color: Color = UiKit.MUTED) -> void:
 	_status.text = text
 	_status.visible = not text.is_empty()
-	_status.add_theme_color_override("font_color", color)
+	_status.add_theme_color_override("font_color", color.lightened(0.15))
+	_status.reset_size()
 
 
 ## Full refresh without animation. `revealed` = numbers in draw order.
