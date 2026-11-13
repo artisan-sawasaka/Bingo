@@ -51,6 +51,22 @@ test('token is read only from a well-formed fragment', () => {
   assert.equal(Protocol.tokenFromHash(''), '');
 });
 
+test('the address always carries the connection code (home-screen icons keep it)', () => {
+  const t = 'AbCdEfGhIjKlMnOpQrStUvWx';
+  const url = Protocol.urlWithToken('/', '', t);
+  assert.equal(url, `/#k=${t}`);
+  // What "Add to Home Screen" bookmarks must be readable again at launch.
+  assert.equal(Protocol.tokenFromHash(url.slice(url.indexOf('#'))), t);
+  assert.equal(Protocol.urlWithToken('/index.html', '?x=1', t), `/index.html?x=1#k=${t}`);
+  assert.equal(Protocol.urlWithToken('', '', t), `/#k=${t}`);
+  // Nothing invalid is ever written into the address.
+  assert.equal(Protocol.urlWithToken('/', '', ''), '/');
+  assert.equal(Protocol.urlWithToken('/', '', 'bad<script>xxxxxxxxxxxx'), '/');
+  assert.equal(Protocol.isToken(t), true);
+  assert.equal(Protocol.isToken('short'), false);
+  assert.equal(Protocol.isToken(null), false);
+});
+
 test('max number validation mirrors the PC rules', () => {
   assert.deepEqual(Protocol.validateMax('75'), { ok: true, value: 75, error: '' });
   assert.equal(Protocol.validateMax('1').ok, true);

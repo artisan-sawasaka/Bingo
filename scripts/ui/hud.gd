@@ -17,6 +17,8 @@ var _number: Label
 var _sub: Label
 var _status: Label
 var _number_tween: Tween
+var _glow: TextureRect
+var _glow_tween: Tween
 
 
 func _ready() -> void:
@@ -25,7 +27,27 @@ func _ready() -> void:
 	_panel = Panel.new()
 	_panel.add_theme_stylebox_override("panel", UiKit.panel_style(UiKit.PANEL, 32))
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel.clip_contents = true
 	add_child(_panel)
+	# Soft light in the color of the drawn ball behind the number; bursts on reveal.
+	var grad := Gradient.new()
+	grad.set_color(0, Color(1, 1, 1, 0.9))
+	grad.set_color(1, Color(1, 1, 1, 0.0))
+	grad.add_point(0.45, Color(1, 1, 1, 0.3))
+	var gtex := GradientTexture2D.new()
+	gtex.gradient = grad
+	gtex.fill = GradientTexture2D.FILL_RADIAL
+	gtex.fill_from = Vector2(0.5, 0.5)
+	gtex.fill_to = Vector2(1.0, 0.5)
+	gtex.width = 256
+	gtex.height = 256
+	_glow = TextureRect.new()
+	_glow.texture = gtex
+	_glow.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_glow.stretch_mode = TextureRect.STRETCH_SCALE
+	_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_glow.modulate = Color(1, 1, 1, 0.0)
+	_panel.add_child(_glow)
 	_caption = UiKit.label("今回の番号", 46, UiKit.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	_panel.add_child(_caption)
 	_letter = UiKit.label("", 96, UiKit.ACCENT, HORIZONTAL_ALIGNMENT_CENTER)
@@ -72,6 +94,10 @@ func _layout() -> void:
 	_number.position = Vector2(0, 230)
 	_number.size = Vector2(w, maxf(240.0, panel_h - 230 - 140))
 	_number.pivot_offset = _number.size * 0.5
+	var glow_size := w * 1.25
+	_glow.size = Vector2(glow_size, glow_size)
+	_glow.position = _number.position + _number.size * 0.5 - _glow.size * 0.5
+	_glow.pivot_offset = _glow.size * 0.5
 	_sub.position = Vector2(0, panel_h - 110)
 	_sub.size = Vector2(w, 60)
 	_status.position = Vector2(m.x + 8, m.y)
@@ -113,6 +139,10 @@ func show_spinning(revealed_count: int) -> void:
 	_number_tween.tween_property(_number, "modulate:a", 0.25, 0.25)
 	_number_tween.parallel().tween_property(_number, "scale", Vector2.ONE * 0.6, 0.25)
 	_letter.modulate.a = 0.25
+	if _glow_tween:
+		_glow_tween.kill()
+	_glow_tween = create_tween()
+	_glow_tween.tween_property(_glow, "modulate:a", 0.0, 0.25)
 	_sub.text = "%d球目" % (revealed_count + 1)
 	if revealed_count == 0:
 		_number.text = ""
@@ -129,7 +159,10 @@ func _show_number(n: int, animate: bool) -> void:
 	_caption.add_theme_color_override("font_color", UiKit.MUTED)
 	if _number_tween:
 		_number_tween.kill()
+	if _glow_tween:
+		_glow_tween.kill()
 	if n <= 0:
+		_glow.modulate.a = 0.0
 		_number.text = "—" if max_number > 0 else ""
 		_number.add_theme_font_size_override("font_size", 140)
 		_number.add_theme_color_override("font_color", UiKit.MUTED)
@@ -144,6 +177,17 @@ func _show_number(n: int, animate: bool) -> void:
 	_letter.add_theme_color_override("font_color", col.lightened(0.2))
 	_letter.modulate.a = 1.0
 	_number.add_theme_font_size_override("font_size", 380 if n < 100 else 290)
+	var glow_col := col.lightened(0.15)
+	_glow.scale = Vector2.ONE
+	if animate:
+		_glow.modulate = Color(glow_col.r, glow_col.g, glow_col.b, 0.95)
+		_glow.scale = Vector2.ONE * 0.35
+		_glow_tween = create_tween()
+		_glow_tween.tween_property(_glow, "scale", Vector2.ONE * 1.25, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		_glow_tween.parallel().tween_property(_glow, "modulate:a", 0.2, 1.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_glow_tween.tween_property(_glow, "scale", Vector2.ONE, 0.6)
+	else:
+		_glow.modulate = Color(glow_col.r, glow_col.g, glow_col.b, 0.2)
 	if animate:
 		_number.modulate.a = 0.0
 		_number.scale = Vector2.ONE * 1.6

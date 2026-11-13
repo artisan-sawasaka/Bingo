@@ -47,6 +47,13 @@ const Protocol = {
     const m = /(?:^#|&)k=([A-Za-z0-9_-]{16,64})(?:&|$)/.exec(hash || '');
     return m ? m[1] : '';
   },
+  isToken(t) { return typeof t === 'string' && /^[A-Za-z0-9_-]{16,64}$/.test(t); },
+  // Address that carries the connection code. "Add to Home Screen" bookmarks
+  // the CURRENT address, and the home-screen app starts with its own empty
+  // storage (iOS), so the code has to stay in the address at all times.
+  urlWithToken(pathname, search, token) {
+    return `${pathname || '/'}${search || ''}${Protocol.isToken(token) ? `#k=${token}` : ''}`;
+  },
   // Same rules as GameState.validate_max_number_text on the PC (PC validates again).
   validateMax(text, min = 1, max = 999) {
     const t = String(text == null ? '' : text).trim();
@@ -135,14 +142,19 @@ function main() {
     set(k, v) { memory[k] = v; try { localStorage.setItem(k, v); } catch (_) { try { sessionStorage.setItem(k, v); } catch (_) { /* memory only */ } } },
   };
 
-  /* ---------- token: taken from #k=… then removed from the address bar ---------- */
+  /* ---------- token: from #k=… (QR / home-screen icon), else from storage ---------- */
+  // The code is deliberately KEPT in the address (it used to be removed):
+  // "Add to Home Screen" saves the current address, and the home-screen app
+  // has its own empty storage, so an icon made from a code-less address could
+  // never connect ("QRコードから開いてください"). A fragment is never sent over HTTP.
   let token = Protocol.tokenFromHash(location.hash);
-  if (token) {
-    store.set(TOKEN_KEY, token);
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* ignore */ }
-  } else {
-    token = store.get(TOKEN_KEY);
+  if (token) store.set(TOKEN_KEY, token); else token = store.get(TOKEN_KEY);
+  if (!Protocol.isToken(token)) token = '';
+  function keepTokenInUrl() {
+    if (!token || Protocol.tokenFromHash(location.hash) === token) return;
+    try { history.replaceState(null, '', Protocol.urlWithToken(location.pathname, location.search, token)); } catch (_) { /* ignore */ }
   }
+  keepTokenInUrl();
   let clientId = store.get(CLIENT_KEY);
   if (!/^[A-Za-z0-9_-]{4,64}$/.test(clientId)) { clientId = Protocol.newId(); store.set(CLIENT_KEY, clientId); }
   let soundOn = store.get(SOUND_KEY) !== 'off';
@@ -313,8 +325,13 @@ function main() {
     conn = c;
     if (c !== 'open') { if (!pending) awaitingReveal = false; screenPending = false; }
     if (c === 'auth_failed' || c === 'no_token') {
+      // A home-screen icon cannot pick up a new code by itself: scanning the QR
+      // opens the browser, not this app, so the icon has to be made again.
+      const how = launchedStandalone
+        ? 'このホーム画面のアイコンは' + (c === 'auth_failed' ? '古い接続コードのままです' : '接続コードが入っていません') + '。\nアイコンを削除し、PC（テレビ）の接続画面（Qキー）のQRコードをカメラで読み取ってブラウザで開いてから、もう一度「ホーム画面に追加」してください。'
+        : 'PC（テレビ）の接続画面（Qキー）に表示されているQRコードを、カメラで読み取ってください。';
       showOverlay(c === 'auth_failed' ? '接続できません' : 'QRコードから開いてください',
-        (detail ? detail + '\n' : '') + 'PC（テレビ）の接続画面（Qキー）に表示されているQRコードを、カメラで読み取ってください。', null);
+        (detail ? detail + '\n' : '') + how, null);
     } else if (overlayKind === 'conn') {
       hideOverlay();
     }
@@ -734,11 +751,9 @@ function main() {
 
   // iPhone Safari has no page fullscreen: the "Add to Home Screen" icon opens
   // without Safari's bars. The home-screen app has its own storage, so the
-  // connection code is put back into the URL for the bookmark to keep it.
+  // connection code must be in the address the icon is made from.
   function showHomeScreenHelp(intro) {
-    if (token) {
-      try { history.replaceState(null, '', `${location.pathname}${location.search}#k=${token}`); } catch (_) { /* ignore */ }
-    }
+    keepTokenInUrl();
     const box = document.createElement('div');
     const p = document.createElement('p');
     p.textContent = intro || 'このブラウザは全画面表示に対応していません。ホーム画面に追加したアイコンから開くと、タブやアドレスバーなしで表示できます。';
@@ -829,17 +844,18 @@ function main() {
       return;
     }
     // Back from lock screen / app switch: connection may be dead without onclose.
+    keepTokenInUrl();
     if (!ws || ws.readyState !== WebSocket.OPEN || Date.now() - lastRx > PING_MS * 1.5) forceReconnect();
     else send({ type: 'get_state' });
   });
-  window.addEventListener('pageshow', (e) => { if (e.persisted) forceReconnect(); });
+  window.addEventListener('pageshow', (e) => { keepTokenInUrl(); if (e.persisted) forceReconnect(); });
   // Re-scanning a QR while this page is open may only change the #fragment.
   window.addEventListener('hashchange', () => {
     const t = Protocol.tokenFromHash(location.hash);
-    if (!t) return;
+    if (!t) { keepTokenInUrl(); return; }  // fragment lost: put the code back
+    if (t === token && conn !== 'auth_failed' && conn !== 'no_token') return;
     token = t;
     store.set(TOKEN_KEY, token);
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* ignore */ }
     conn = 'connecting';
     hideOverlay();
     forceReconnect();

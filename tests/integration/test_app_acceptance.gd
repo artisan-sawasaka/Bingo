@@ -47,10 +47,28 @@ func _type(text: String) -> void:
 		await _key(KEY_0 + (ch.unicode_at(0) - 48), ch.unicode_at(0))
 
 
+## The stage mirrors the game: drum = numbers left, tray = last ball, rim = earlier balls (newest first).
+func _check_stage(main, label: String) -> void:
+	var s = main.controller.state
+	var in_drum: Array[int] = main.machine.drum_numbers()
+	in_drum.sort()
+	var left: Array[int] = s.remaining.duplicate()
+	left.sort()
+	eq(in_drum, left, label + ": drum holds exactly the remaining numbers")
+	eq(main.machine.tray_number(), s.last_number(), label + ": tray holds the last number")
+	var expected: Array[int] = []
+	for i in range(s.drawn.size() - 2, -1, -1):
+		if expected.size() < main.machine.ring.capacity:
+			expected.append(s.drawn[i])
+	eq(main.machine.ring_numbers(), expected, label + ": rim holds the earlier balls, newest first")
+
+
 func test_75_draws_through_app_then_restart() -> void:
 	var main = await _make_main()
 	main._start_game(75)
 	eq(main.controller.phase_name(), "ready", "ready after start")
+	eq(main.machine.drum_numbers().size(), 75, "75 numbered balls in the drum")
+	_check_stage(main, "fresh game")
 	var seen := {}
 	for i in 75:
 		# Hammer: several keyboard spins in the same frame must yield one draw.
@@ -65,7 +83,11 @@ func test_75_draws_through_app_then_restart() -> void:
 		var n: int = main.controller.state.last_number()
 		check(not seen.has(n), "duplicate %d" % n)
 		seen[n] = true
+		if i in [0, 1, 2, 37, 73, 74]:
+			_check_stage(main, "after draw %d" % (i + 1))
 	eq(seen.size(), 75, "75 unique")
+	eq(main.machine.drum_numbers().size(), 0, "drum is empty at the end")
+	eq(main.machine.ring_numbers().size(), 74, "74 balls around the stage")
 	eq(main.controller.state.drawn.size(), 75, "exactly 75 draws")
 	eq(main.controller.phase_name(), "finished", "finished")
 	main._keyboard_spin()
@@ -76,6 +98,7 @@ func test_75_draws_through_app_then_restart() -> void:
 	var main2 = await _make_main()
 	eq(main2.controller.state.drawn, order, "restored order after restart")
 	eq(main2.controller.phase_name(), "finished", "still finished")
+	_check_stage(main2, "after restart")
 	check(main2.overlays.is_open("restore"), "restore screen shown")
 	main2.queue_free()
 	await wait_frames(3)
@@ -212,6 +235,67 @@ func test_keyboard_screens_spin_history_and_reset() -> void:
 		eq(lic.scroll_vertical, 0.0, "Home back to the top")
 	await _key(KEY_ESCAPE)
 	check(not main.overlays.is_open("licenses"), "Esc closes licenses")
+	main.queue_free()
+	await wait_frames(3)
+
+
+func test_idle_machine_is_calm_and_levels_are_separate() -> void:
+	var main = await _make_main()
+	main._start_game(75)
+	await wait_frames(2)
+	# Nothing is being drawn: the blower is off (balls rest, no sparks).
+	eq(main.machine.IDLE_AGITATION, 0.0, "no stirring while idle")
+	await wait_frames(5)
+	check(main.machine.sim.agitation < 0.001, "blower off before the first draw")
+	main._keyboard_spin()
+	var stirred := false
+	while main.controller.phase_name() == "spinning":
+		if main.machine.sim.agitation > 0.5:
+			stirred = true
+		await tree.process_frame
+	check(stirred, "balls are stirred while the number is drawn")
+	check(await wait_until(func(): return main.machine.sim.agitation < 0.001, 5.0), "blower off again after the draw")
+	# S: settings screen with one slider for SE and one for BGM.
+	await wait_until(func(): return main.controller.can_spin(), 2.0)
+	await _key(KEY_S)
+	await wait_frames(2)
+	var layer: Control = main.overlays._layers["settings"]
+	var se: HSlider = layer.find_child("SeVolume", true, false)
+	var bgm: HSlider = layer.find_child("BgmVolume", true, false)
+	var bgm_switch: CheckButton = layer.find_child("BgmSwitch", true, false)
+	check(se != null and bgm != null and bgm_switch != null, "SE slider, BGM slider and BGM switch exist")
+	if se != null and bgm != null:
+		check(main.get_viewport().gui_get_focus_owner() == se, "SE slider focused first (keyboard)")
+		se.value = 40
+		await wait_frames(1)
+		check(absf(main.settings.se_volume - 0.4) < 0.001, "SE level changed")
+		check(absf(main.sfx.get_volume() - 0.4) < 0.01, "SE bus follows: %.3f" % main.sfx.get_volume())
+		var bgm_before: float = main.settings.bgm_volume
+		check(absf(main.bgm.volume - bgm_before) < 0.001, "BGM level untouched by the SE slider")
+		bgm.value = 70
+		await wait_frames(1)
+		check(absf(main.settings.bgm_volume - 0.7) < 0.001, "BGM level changed")
+		check(absf(main.bgm.volume - 0.7) < 0.001, "BGM player follows")
+		check(absf(main.sfx.get_volume() - 0.4) < 0.01, "SE level untouched by the BGM slider")
+		eq(AudioServer.get_bus_volume_db(AudioServer.get_bus_index("Master")), 0.0, "master bus is left alone")
+	# The screen-space extras (floor reflections etc.) can be switched off for slow PCs.
+	var fx_switch: CheckButton = layer.find_child("EffectsSwitch", true, false)
+	check(fx_switch != null, "effects switch exists")
+	if fx_switch != null:
+		check(main.machine.effects_high, "extras on by default")
+		fx_switch.button_pressed = false
+		await wait_frames(1)
+		check(not main.settings.effects_high and not main.machine.effects_high, "switched off in the machine")
+		fx_switch.button_pressed = true
+		await wait_frames(1)
+		check(main.settings.effects_high and main.machine.effects_high, "switched on again")
+	await _key(KEY_ESCAPE)
+	# B toggles the music without touching the levels.
+	await _key(KEY_B)
+	check(not main.settings.bgm_enabled, "B switches the BGM off")
+	await _key(KEY_B)
+	check(main.settings.bgm_enabled, "B switches it on again")
+	check(absf(main.settings.bgm_volume - 0.7) < 0.001 and absf(main.settings.se_volume - 0.4) < 0.001, "levels kept")
 	main.queue_free()
 	await wait_frames(3)
 

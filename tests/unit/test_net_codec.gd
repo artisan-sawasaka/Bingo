@@ -163,3 +163,50 @@ func test_private_ip_detection() -> void:
 		check(NetInfo.is_private_ipv4(ip), ip)
 	for ip in ["8.8.8.8", "172.32.0.1", "127.0.0.1", "169.254.1.1", "::1", "fe80::1", "abc"]:
 		check(not NetInfo.is_private_ipv4(ip), "not " + ip)
+
+
+## Real case: Wi-Fi off but still holding its old DHCP address (Windows
+## "Deprecated"), the PC actually on Ethernet in the same subnet. Wi-Fi used
+## to win (+15) and the startup QR pointed at an address nobody can reach.
+func _ifaces_wifi_lost_link() -> Array:
+	return [
+		{"friendly": "Loopback Pseudo-Interface 1", "addresses": ["::1", "127.0.0.1"]},
+		{"friendly": "Wi-Fi", "addresses": ["fe80:0:0:0:1:2:3:4", "192.168.3.35"]},
+		{"friendly": "イーサネット", "addresses": ["fe80:0:0:0:5:6:7:8", "192.168.3.4"]},
+		{"friendly": "vEthernet (Default Switch)", "addresses": ["192.168.144.1"]},
+		{"friendly": "Tailscale", "addresses": ["169.254.83.107"]},
+	]
+
+
+func test_rank_puts_stale_address_last() -> void:
+	# What resolving the PC name returns there: live addresses only.
+	var active := ["169.254.83.107", "192.168.144.1", "192.168.3.4"]
+	var r := NetInfo.rank(_ifaces_wifi_lost_link(), [], active)
+	eq(r.size(), 3, "private IPv4 only")
+	eq(r[0].ip, "192.168.3.4", "live Ethernet first")
+	eq(r[0].active, true, "live")
+	eq(r[r.size() - 1].ip, "192.168.3.35", "stale Wi-Fi after everything, even the virtual switch")
+	eq(r[r.size() - 1].active, false, "marked stale")
+
+
+func test_rank_without_liveness_info_keeps_old_order() -> void:
+	# active unknown (lookup failed / not Windows): nothing is demoted.
+	var r := NetInfo.rank(_ifaces_wifi_lost_link(), [], [])
+	eq(r[0].ip, "192.168.3.35", "Wi-Fi preferred when both look live")
+	eq(r[1].ip, "192.168.3.4", "then Ethernet")
+	eq(r[2].ip, "192.168.144.1", "virtual adapter last")
+	for a in r:
+		check(a.active, "all live: " + a.ip)
+
+
+func test_rank_falls_back_to_plain_address_list() -> void:
+	var r := NetInfo.rank([], ["127.0.0.1", "10.0.0.5", "192.168.1.20"], ["192.168.1.20"])
+	eq(r.size(), 2, "private only")
+	eq(r[0].ip, "192.168.1.20", "live first")
+	eq(r[1].active, false, "10.0.0.5 not in the live set")
+
+
+func test_active_ipv4_returns_ipv4_text() -> void:
+	# Environment-dependent content; only the shape is checked.
+	for ip in NetInfo.active_ipv4():
+		check(typeof(ip) == TYPE_STRING and String(ip).split(".").size() == 4, "IPv4: %s" % str(ip))

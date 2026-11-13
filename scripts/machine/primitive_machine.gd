@@ -8,6 +8,8 @@ extends RefCounted
 ##     ExitMarker      – where the drawn ball leaves the drum
 ##     ChutePoint_1..N – path from exit to tray
 ##     TrayMarker      – resting center of the drawn ball
+##     BallRing        – lap of the already-drawn balls on the stage rim:
+##                       position = lap center on the stage surface, scale.x = lap radius (m)
 ##     CameraTarget    – what the camera looks at
 
 const DRUM_CENTER := Vector3(0.0, 1.55, 0.0)
@@ -22,6 +24,10 @@ const BODY_TOP := 0.6
 ## Exit direction from the drum center (front-bottom) and how far outside the sweep it sits.
 const EXIT_DIR := Vector3(0.0, -0.65, 0.76)
 const EXIT_CLEARANCE := 0.12
+## Stage (round base) and the lap where drawn balls rest, just inside its gold trim.
+const STAGE_CENTER := Vector3(0.0, 0.0, 0.15)
+const STAGE_RADIUS := 1.75
+const RING_RADIUS := 1.645
 
 
 static func _mat(color: Color, metallic: float = 0.0, roughness: float = 0.5, emission: Color = Color.BLACK, emission_energy: float = 0.0) -> StandardMaterial3D:
@@ -68,14 +74,31 @@ static func build() -> Node3D:
 
 	# --- stage
 	var stage := CylinderMesh.new()
-	stage.top_radius = 1.75
-	stage.bottom_radius = 1.85
-	stage.height = 0.16
-	_mesh(root, stage, dark, Vector3(0, 0.08, 0.15), "Stage")
+	stage.top_radius = STAGE_RADIUS
+	stage.bottom_radius = STAGE_RADIUS + 0.1
+	stage.height = STAGE_TOP
+	stage.radial_segments = 96
+	_mesh(root, stage, dark, STAGE_CENTER + Vector3(0, STAGE_TOP * 0.5, 0), "Stage")
 	var trim := TorusMesh.new()
-	trim.inner_radius = 1.72
-	trim.outer_radius = 1.8
-	_mesh(root, trim, _mat(Color(1.0, 0.8, 0.35), 0.6, 0.3, Color(1.0, 0.7, 0.25), 0.45), Vector3(0, 0.165, 0.15), "StageTrim")
+	trim.inner_radius = STAGE_RADIUS - 0.03
+	trim.outer_radius = STAGE_RADIUS + 0.05
+	trim.rings = 96
+	_mesh(root, trim, _mat(Color(1.0, 0.8, 0.35), 0.6, 0.3, Color(1.0, 0.7, 0.25), 0.45), STAGE_CENTER + Vector3(0, STAGE_TOP + 0.005, 0), "StageTrim")
+	# Lap of the drawn balls: they rest between this inner rail and the trim.
+	_marker(root, "BallRing", STAGE_CENTER + Vector3(0, STAGE_TOP, 0), RING_RADIUS)
+	var ring_rail := TorusMesh.new()
+	ring_rail.inner_radius = RING_RADIUS - BALL_RADIUS - 0.034
+	ring_rail.outer_radius = RING_RADIUS - BALL_RADIUS - 0.01
+	ring_rail.rings = 96
+	ring_rail.ring_segments = 12
+	_mesh(root, ring_rail, gold, STAGE_CENTER + Vector3(0, STAGE_TOP + 0.004, 0), "RingRail")
+	var lane := TorusMesh.new()
+	lane.inner_radius = RING_RADIUS - 0.03
+	lane.outer_radius = RING_RADIUS + 0.03
+	lane.rings = 96
+	lane.ring_segments = 8
+	# A thin, slightly glowing line marks the lap under the balls.
+	_mesh(root, lane, _mat(Color(0.5, 0.2, 0.6), 0.2, 0.5, Color(0.75, 0.35, 1.0), 0.55), STAGE_CENTER + Vector3(0, STAGE_TOP - 0.024, 0), "RingLane")
 
 	# --- body / pedestal under the drum
 	# Kept low so the rotating drum frame never touches it (clearance >= 0.1 m).
@@ -199,13 +222,14 @@ static func build() -> Node3D:
 	tray_pad.bottom_radius = 0.2
 	tray_pad.height = 0.02
 	_mesh(root, tray_pad, _mat(Color(0.45, 0.05, 0.12), 0.0, 0.9), tray_pos - Vector3(0, BALL_RADIUS - 0.005, 0), "TrayPad")
+	# Slim, so the balls on the lap pass next to it without touching.
 	var stand := CylinderMesh.new()
-	stand.top_radius = 0.04
-	stand.bottom_radius = 0.07
+	stand.top_radius = 0.035
+	stand.bottom_radius = 0.048
 	stand.height = tray_pos.y - BALL_RADIUS - 0.06 - 0.16
 	_mesh(root, stand, gold, Vector3(tray_pos.x, 0.16 + stand.height * 0.5, tray_pos.z), "TrayStand")
 
-	_marker(root, "CameraTarget", Vector3(0.3, 1.18, 0.35))
+	_marker(root, "CameraTarget", Vector3(0.06, 0.94, 0.4))
 	return root
 
 

@@ -24,6 +24,9 @@ powershell -ExecutionPolicy Bypass -File tools\build_windows.ps1      # エク�
 ## 規約・注意
 
 - 抽選結果は `GameController.request_spin()` だけが決め、演出前に保存する。3D/UI は結果を表示するだけ。
+- 抽選機の表示はゲーム状態の写し：`machine.set_state(max, remaining, drawn)` でドラム（残りの番号の球）・受け皿（最後の球）・外周（それ以前の球）を一括設定する。ドラムの球の動き（`drum_sim.gd`）は見た目専用で、番号の決定には使わない。
+- 球はすべて MultiMesh で描く（`ball_visuals.gd`、番号と色はインスタンスデータ）。球ごとに Node やテクスチャを作らない。
+- 動きの確認は連続キャプチャ（`--capture=PATH --capture-count=N --capture-interval=SEC`、`--demo-spin=SEC` と併用）。
 - `class_name` は使わず `preload()` 定数で参照（ヘッドレス `-s` 実行でグローバルクラスキャッシュに依存しないため）。
 - 型推論 `:=` は戻り値が Variant の式（untyped 配列要素、preload したスクリプトの静的関数の戻り値など）で使うとパースエラーになる。明示型を書く。
 - 日本語を含むファイルを PowerShell の `Get-Content`/`Set-Content` で書き換えない（文字化けする）。編集は Edit ツールで。

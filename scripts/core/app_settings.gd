@@ -11,8 +11,14 @@ const SPEED_LABELS := {"short": "短い", "normal": "標準", "long": "長い", 
 const BASE_TIMING := {"start": 0.2, "spin_end": 1.4, "eject_end": 1.85, "reveal_end": 2.4}
 
 var path: String
-var volume: float = 0.8
+## Sound effects (SE) and background music (BGM) have separate levels, 0..1.
+var se_volume: float = 0.8
+## Kept low on purpose; `bgm_enabled` is the on/off switch (B key).
+var bgm_volume: float = 0.3
+var bgm_enabled: bool = true
 var speed: String = "normal"
+## Screen-space extras (floor reflections, contact shadows). Off = cheaper to draw.
+var effects_high: bool = true
 var fullscreen: bool = true
 var safe_margin: float = 0.03
 var port: int = 8765
@@ -28,10 +34,22 @@ func load_file() -> void:
 	var d = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if typeof(d) != TYPE_DICTIONARY:
 		return
-	if typeof(d.get("volume")) == TYPE_FLOAT:
-		volume = clampf(d.volume, 0.0, 1.0)
+	if typeof(d.get("bgm_volume")) == TYPE_FLOAT:
+		bgm_volume = clampf(d.bgm_volume, 0.0, 1.0)
+	if typeof(d.get("se_volume")) == TYPE_FLOAT:
+		se_volume = clampf(d.se_volume, 0.0, 1.0)
+	elif typeof(d.get("volume")) == TYPE_FLOAT:
+		# Older files had one overall "volume": it becomes the SE level, and a
+		# BGM level saved next to it (it was relative to that volume) keeps its loudness.
+		se_volume = clampf(d.volume, 0.0, 1.0)
+		if typeof(d.get("bgm_volume")) == TYPE_FLOAT:
+			bgm_volume = clampf(bgm_volume * se_volume, 0.0, 1.0)
+	if typeof(d.get("bgm_enabled")) == TYPE_BOOL:
+		bgm_enabled = d.bgm_enabled
 	if typeof(d.get("speed")) == TYPE_STRING and SPEED_OPTIONS.has(d.speed):
 		speed = d.speed
+	if typeof(d.get("effects_high")) == TYPE_BOOL:
+		effects_high = d.effects_high
 	if typeof(d.get("fullscreen")) == TYPE_BOOL:
 		fullscreen = d.fullscreen
 	if typeof(d.get("safe_margin")) == TYPE_FLOAT:
@@ -45,7 +63,7 @@ func save_file() -> void:
 	if f == null:
 		push_warning("settings: cannot write %s" % path)
 		return
-	f.store_string(JSON.stringify({"volume": volume, "speed": speed, "fullscreen": fullscreen, "safe_margin": safe_margin, "port": port}, "  "))
+	f.store_string(JSON.stringify({"se_volume": se_volume, "bgm_volume": bgm_volume, "bgm_enabled": bgm_enabled, "speed": speed, "effects_high": effects_high, "fullscreen": fullscreen, "safe_margin": safe_margin, "port": port}, "  "))
 	f.close()
 
 

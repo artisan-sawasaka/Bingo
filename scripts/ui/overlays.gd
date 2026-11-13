@@ -15,6 +15,8 @@ signal start_game_requested(max_number: int)
 signal setup_cancel_requested
 signal setup_requested
 signal settings_changed
+## The SE volume slider moved: play a sample at the new level.
+signal se_preview_requested
 signal reissue_token_requested
 signal quit_requested
 ## Any layer opened or closed.
@@ -307,6 +309,11 @@ func open_connect() -> void:
 	box.add_child(btns)
 	box.add_child(_key_hint("I：別のIP　R：QR再発行（古い接続を無効化）　Q / Esc：閉じる　Space：閉じて抽選"))
 	_open("connect", m.root)
+	# The network may have changed since the server started (Wi-Fi joined late,
+	# new DHCP address, cable unplugged): read the addresses again so the QR
+	# and the server's Host check use the current ones.
+	if server != null:
+		server.refresh_addresses()
 	refresh_connect()
 
 
@@ -335,6 +342,8 @@ func refresh_connect() -> void:
 	_connect_ip_btn.disabled = addrs.size() <= 1
 	_connect_url.text = server.base_url(a.ip)
 	var label: String = a.name if not String(a.name).is_empty() else "ネットワーク"
+	if not a.get("active", true):
+		label += "・未接続の可能性"
 	var n: int = server.client_count()
 	_connect_status.text = "%s（%d/%d）   ・   接続中のリモコン：%d台" % [label, _ip_index + 1, addrs.size(), n]
 	var q = QrCode.encode_text(server.pairing_url(a.ip), QrCode.ECC_M)
@@ -354,18 +363,48 @@ func open_settings(game_info: String) -> void:
 	grid.add_theme_constant_override("v_separation", 20)
 	box.add_child(grid)
 
-	grid.add_child(UiKit.label("音量", 32))
+	# Two independent levels: sound effects (SE) and background music (BGM).
+	grid.add_child(UiKit.label("効果音（SE）の音量", 32))
 	var vol := HSlider.new()
+	vol.name = "SeVolume"
 	vol.min_value = 0
 	vol.max_value = 100
 	vol.step = 5
-	vol.value = settings.volume * 100.0
+	vol.value = settings.se_volume * 100.0
 	vol.custom_minimum_size = Vector2(520, 48)
 	vol.focus_mode = Control.FOCUS_ALL
 	vol.value_changed.connect(func(v):
-		settings.volume = v / 100.0
-		settings_changed.emit())
+		settings.se_volume = v / 100.0
+		settings_changed.emit()
+		se_preview_requested.emit())
 	grid.add_child(vol)
+
+	grid.add_child(UiKit.label("BGM の音量", 32))
+	var bgm_row := HBoxContainer.new()
+	bgm_row.add_theme_constant_override("separation", 18)
+	var bgm_vol := HSlider.new()
+	bgm_vol.name = "BgmVolume"
+	bgm_vol.min_value = 0
+	bgm_vol.max_value = 100
+	bgm_vol.step = 5
+	bgm_vol.value = settings.bgm_volume * 100.0
+	bgm_vol.custom_minimum_size = Vector2(300, 48)
+	bgm_vol.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bgm_vol.focus_mode = Control.FOCUS_ALL
+	bgm_vol.value_changed.connect(func(v):
+		settings.bgm_volume = v / 100.0
+		settings_changed.emit())
+	bgm_row.add_child(bgm_vol)
+	var bgm_on := CheckButton.new()
+	bgm_on.name = "BgmSwitch"
+	bgm_on.button_pressed = settings.bgm_enabled
+	bgm_on.text = "オン（Bキー）"
+	bgm_on.add_theme_font_size_override("font_size", 26)
+	bgm_on.toggled.connect(func(on):
+		settings.bgm_enabled = on
+		settings_changed.emit())
+	bgm_row.add_child(bgm_on)
+	grid.add_child(bgm_row)
 
 	grid.add_child(UiKit.label("演出の長さ", 32))
 	var speed := OptionButton.new()
@@ -381,6 +420,17 @@ func open_settings(game_info: String) -> void:
 		settings.speed = keys[i]
 		settings_changed.emit())
 	grid.add_child(speed)
+
+	grid.add_child(UiKit.label("高画質エフェクト", 32))
+	var fx := CheckButton.new()
+	fx.name = "EffectsSwitch"
+	fx.button_pressed = settings.effects_high
+	fx.text = "床の映り込み・接地の影（動きが重い時はオフ）"
+	fx.add_theme_font_size_override("font_size", 26)
+	fx.toggled.connect(func(on):
+		settings.effects_high = on
+		settings_changed.emit())
+	grid.add_child(fx)
 
 	grid.add_child(UiKit.label("フルスクリーン", 32))
 	var fs := CheckButton.new()
@@ -502,6 +552,7 @@ func open_help() -> void:
 		["M", "最大番号の設定・リセット画面"],
 		["Q", "スマホ・iPad 接続画面（QR）"],
 		["S / Esc", "設定（Esc は画面を閉じる・戻る）"],
+		["B", "BGM のオン／オフ（音量は設定画面）"],
 		["F11", "フルスクリーン切替"],
 		["L", "ライセンス表記"],
 		["F1 / ?", "このキー一覧"],

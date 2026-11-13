@@ -16,6 +16,8 @@ extends Node
 ##   --auto-start=N        start a new game with max N when nothing is restored
 ##   --demo-draws=N        draw N numbers instantly at startup (screenshots)
 ##   --show=connect|settings|history|setup|help|licenses  open that screen at startup (screenshots)
+##   --low-effects         force the "高画質エフェクト" setting off for this run
+##   --gpu-report          print the measured GPU / CPU render time with each capture
 
 const GameController = preload("res://scripts/core/game_controller.gd")
 const GameState = preload("res://scripts/core/game_state.gd")
@@ -29,6 +31,7 @@ const HistoryScreen = preload("res://scripts/ui/history_screen.gd")
 const Overlays = preload("res://scripts/ui/overlays.gd")
 const UiKit = preload("res://scripts/ui/ui_kit.gd")
 const Sfx = preload("res://scripts/audio/sfx.gd")
+const Bgm = preload("res://scripts/audio/bgm.gd")
 const RandomSource = preload("res://scripts/core/random_source.gd")
 
 var settings := AppSettings.new()
@@ -39,6 +42,7 @@ var hud: Hud
 var history: HistoryScreen
 var overlays: Overlays
 var sfx: Sfx
+var bgm: Bgm
 var _ui_root: Control
 var _rng := RandomSource.secure()
 var _args := {}
@@ -77,6 +81,9 @@ func _ready() -> void:
 	sfx = Sfx.new()
 	sfx.name = "Sfx"
 	add_child(sfx)
+	bgm = Bgm.new()
+	bgm.name = "Bgm"
+	add_child(bgm)
 
 	machine = BingoMachine.new()
 	machine.name = "BingoMachine"
@@ -159,6 +166,8 @@ func _ready() -> void:
 			overlays.open_licenses()
 	if _args.has("demo-spin"):
 		get_tree().create_timer(float(_args["demo-spin"])).timeout.connect(func(): _keyboard_spin())
+	if _args.has("gpu-report"):
+		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 	if _args.has("capture"):
 		# Screenshot runs must not steal keyboard focus from whatever the user is typing in.
 		DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_NO_FOCUS, true)
@@ -189,13 +198,19 @@ func _connect_signals() -> void:
 	overlays.settings_changed.connect(func():
 		_apply_settings()
 		settings.save_file())
+	# Moving the SE slider plays a short sample so the level can be judged by ear.
+	overlays.se_preview_requested.connect(func():
+		if not sfx.is_playing("pop"):
+			sfx.play("pop"))
 	overlays.reissue_token_requested.connect(_reissue_token)
 	overlays.quit_requested.connect(func(): get_tree().quit())
 	get_viewport().size_changed.connect(_update_view_rect)
 
 
 func _apply_settings() -> void:
-	Sfx.set_master_volume(settings.volume)
+	Sfx.set_volume(settings.se_volume)
+	bgm.set_level(settings.bgm_volume, settings.bgm_enabled)
+	machine.set_effects_quality(settings.effects_high and not _args.has("low-effects"))
 	hud.set_safe_margin(settings.safe_margin)
 	history.set_safe_margin(settings.safe_margin)
 	controller.expected_animation_sec = settings.max_reveal_sec()
@@ -338,6 +353,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				overlays.close("licenses")
 			elif not overlays.is_blocking() and not controller.is_spinning():
 				overlays.open_licenses()
+		KEY_B:
+			if not overlays.is_blocking():
+				toggle_bgm()
 		KEY_F11:
 			settings.fullscreen = not settings.fullscreen
 			_args.erase("windowed")
@@ -370,6 +388,17 @@ func _back() -> void:
 		show_history(false)
 	elif not controller.is_spinning():
 		overlays.open_settings(_game_info())
+
+
+## B key: background music on / off (the level is in the settings screen).
+func toggle_bgm() -> void:
+	settings.bgm_enabled = not settings.bgm_enabled
+	_apply_settings()
+	settings.save_file()
+	if settings.bgm_enabled and settings.bgm_volume <= 0.001:
+		overlays.toast("BGM：オン（設定で BGM の音量が 0 になっています）", 2.0)
+	else:
+		overlays.toast("BGM：オン" if settings.bgm_enabled else "BGM：オフ", 1.5)
 
 
 func _keyboard_spin() -> void:
@@ -465,9 +494,8 @@ func _start_game(max_number: int, request_id: String = "") -> Dictionary:
 
 func _reset_presenters() -> void:
 	var s = controller.state
-	machine.set_max_number(s.max_number)
-	machine.set_ball_count(s.remaining.size())
-	machine.show_in_tray(s.last_number())
+	# Drum = the numbers still left, tray = the last ball, stage rim = the earlier ones.
+	machine.set_state(s.max_number, s.remaining, s.drawn)
 	hud.set_state(s.max_number, controller.revealed_numbers(), controller.phase_name())
 	history.set_state(s.max_number, controller.revealed_numbers(), controller.phase_name())
 	overlays.show_banner("全ての番号が出ました" if s.is_finished() else "")
@@ -480,9 +508,10 @@ func _on_spin_started(info: Dictionary) -> void:
 	show_history(false)
 	overlays.show_error("")
 	hud.show_spinning(controller.revealed_numbers().size())
+	bgm.set_ducked(true)  # the machine's sounds come first during a draw
 	# "ランダム" picks short / normal / long for each draw.
 	_draw_speed = settings.pick_speed(_speed_rng)
-	machine.play_draw(int(info.number), AppSettings.timing_for(_draw_speed), controller.state.remaining.size())
+	machine.play_draw(int(info.number), AppSettings.timing_for(_draw_speed))
 	print("draw #%d accepted (source=%s, speed=%s)" % [info.draw_index, info.source, _draw_speed])
 
 
@@ -492,11 +521,14 @@ func _on_stage(stage: String, _number: int) -> void:
 		"start":
 			sfx.play("start")
 			sfx.play("rattle", 1.0 / k)
+			sfx.play("riser", 1.0 / k, -9.0)
 		"eject":
 			sfx.stop("rattle")
+			sfx.stop("riser")
 			sfx.play("release")
 		"reveal":
 			sfx.play("reveal")
+			sfx.play("pop", 1.0, -5.0)
 			if controller.state != null:
 				hud.reveal(controller.state.drawn, "finished" if controller.state.is_finished() else "ready")
 		"done":
@@ -506,6 +538,7 @@ func _on_stage(stage: String, _number: int) -> void:
 
 
 func _on_spin_finished(_info: Dictionary) -> void:
+	bgm.set_ducked(false)
 	# Watchdog path or normal path: make sure every screen shows the confirmed state.
 	if controller.state != null:
 		var s = controller.state
@@ -514,6 +547,7 @@ func _on_spin_finished(_info: Dictionary) -> void:
 		if s.is_finished():
 			overlays.show_banner("全ての番号が出ました！")
 			sfx.play("finish")
+			machine.celebrate()
 	_update_status()
 
 
@@ -537,17 +571,32 @@ func _update_status() -> void:
 	hud.set_status(txt, col)
 
 
+## --capture-count=N --capture-interval=SEC saves N frames (PATH, PATH-2.png, ...)
+## so animations can be checked from stills.
 func _capture() -> void:
-	await RenderingServer.frame_post_draw
-	var img := get_viewport().get_texture().get_image()
-	if _args.has("capture-crop"):
-		# x,y,w,h in pixels; the region is enlarged 3x for close inspection.
-		var c: PackedStringArray = String(_args["capture-crop"]).split(",")
-		if c.size() == 4:
-			img = img.get_region(Rect2i(int(c[0]), int(c[1]), int(c[2]), int(c[3])))
-			img.resize(img.get_width() * 3, img.get_height() * 3, Image.INTERPOLATE_LANCZOS)
-	var path: String = _args["capture"]
-	var err := img.save_png(path)
-	print("capture saved: %s (%s)" % [path, error_string(err)])
+	var count := maxi(1, int(_args.get("capture-count", "1")))
+	var interval := float(_args.get("capture-interval", "0.25"))
+	var base: String = _args["capture"]
+	for shot in count:
+		await RenderingServer.frame_post_draw
+		if _args.has("gpu-report"):
+			var rid := get_viewport().get_viewport_rid()
+			print("render time: gpu %.2f ms, cpu %.2f ms, %d fps (effects %s)" % [
+				RenderingServer.viewport_get_measured_render_time_gpu(rid),
+				RenderingServer.viewport_get_measured_render_time_cpu(rid),
+				int(Engine.get_frames_per_second()),
+				"high" if machine.effects_high else "low"])
+		var img := get_viewport().get_texture().get_image()
+		if _args.has("capture-crop"):
+			# x,y,w,h in pixels; the region is enlarged 3x for close inspection.
+			var c: PackedStringArray = String(_args["capture-crop"]).split(",")
+			if c.size() == 4:
+				img = img.get_region(Rect2i(int(c[0]), int(c[1]), int(c[2]), int(c[3])))
+				img.resize(img.get_width() * 3, img.get_height() * 3, Image.INTERPOLATE_LANCZOS)
+		var path := base if shot == 0 else "%s-%d.%s" % [base.get_basename(), shot + 1, base.get_extension()]
+		var err := img.save_png(path)
+		print("capture saved: %s (%s)" % [path, error_string(err)])
+		if shot < count - 1:
+			await get_tree().create_timer(interval).timeout
 	if _args.has("quit-after-capture"):
 		get_tree().quit()

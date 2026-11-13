@@ -1,18 +1,24 @@
 extends Node
 ## Procedurally synthesized sound effects (no external audio assets / licenses).
 ## Replaceable later by dropping files into res://assets/audio/ with the same
-## names (start.ogg / rattle.ogg / release.ogg / reveal.ogg / finish.ogg).
+## names (start.ogg / rattle.ogg / riser.ogg / release.ogg / reveal.ogg / pop.ogg /
+## finish.ogg / error.ogg).
 
 const RATE := 44100
+## Every effect plays on its own bus, so its level is independent of the BGM.
+const BUS := "SFX"
 
 var _players := {}
 var _streams := {}
 
 
 func _ready() -> void:
+	ensure_bus()
 	_streams = {
 		"start": _override("start", _make_start()),
 		"rattle": _override("rattle", _make_rattle(1.2)),
+		"riser": _override("riser", _make_riser(1.2)),
+		"pop": _override("pop", _make_pop()),
 		"release": _override("release", _make_release()),
 		"reveal": _override("reveal", _make_chime([880.0, 1318.5], 1.1)),
 		"finish": _override("finish", _make_chime([659.3, 830.6, 987.8, 1318.5], 2.0)),
@@ -21,9 +27,16 @@ func _ready() -> void:
 	for key in _streams:
 		var p := AudioStreamPlayer.new()
 		p.stream = _streams[key]
-		p.bus = "Master"
+		p.bus = BUS
 		add_child(p)
 		_players[key] = p
+
+
+## Sounds still ringing when the app closes would be reported as leaked objects.
+func _exit_tree() -> void:
+	for key in _players:
+		var p: AudioStreamPlayer = _players[key]
+		p.stop()
 
 
 func play(name: String, pitch: float = 1.0, volume_db: float = 0.0) -> void:
@@ -41,10 +54,33 @@ func stop(name: String) -> void:
 		p.stop()
 
 
-static func set_master_volume(linear: float) -> void:
-	var bus := AudioServer.get_bus_index("Master")
+func is_playing(name: String) -> bool:
+	var p: AudioStreamPlayer = _players.get(name)
+	return p != null and p.playing
+
+
+static func ensure_bus() -> int:
+	var bus := AudioServer.get_bus_index(BUS)
+	if bus < 0:
+		AudioServer.add_bus()
+		bus = AudioServer.bus_count - 1
+		AudioServer.set_bus_name(bus, BUS)
+		AudioServer.set_bus_send(bus, "Master")
+	return bus
+
+
+## Level of all sound effects, 0..1 (the BGM has its own level, see bgm.gd).
+static func set_volume(linear: float) -> void:
+	var bus := ensure_bus()
 	AudioServer.set_bus_volume_db(bus, linear_to_db(clampf(linear, 0.0001, 1.0)))
 	AudioServer.set_bus_mute(bus, linear <= 0.001)
+
+
+static func get_volume() -> float:
+	var bus := ensure_bus()
+	if AudioServer.is_bus_mute(bus):
+		return 0.0
+	return db_to_linear(AudioServer.get_bus_volume_db(bus))
 
 
 func _override(name: String, fallback: AudioStream) -> AudioStream:
@@ -107,6 +143,39 @@ static func _make_rattle(length: float) -> AudioStreamWAV:
 			var t := float(k) / RATE
 			s[i + k] += sin(TAU * freq * t) * exp(-t * 400.0) * amp * rng.randf_range(0.6, 1.0)
 		i += maxi(1, gap + rng.randi_range(-gap / 3, gap / 3))
+	return _to_wav(s)
+
+
+static func _make_riser(length: float) -> AudioStreamWAV:
+	# Anticipation while the drum spins: a soft tone gliding upward with a
+	# quickening flutter, fading in and cut off just before the ball drops.
+	var n := int(RATE * length)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	var ph := 0.0
+	var flutter := 0.0
+	for i in n:
+		var u := float(i) / n
+		ph += TAU * lerpf(260.0, 780.0, u * u) / RATE
+		flutter += TAU * lerpf(5.0, 17.0, u) / RATE
+		var env := smoothstep(0.0, 0.25, u) * (1.0 - smoothstep(0.9, 1.0, u))
+		s[i] = (sin(ph) + 0.3 * sin(ph * 2.0)) * (0.6 + 0.4 * sin(flutter)) * env * 0.3
+	return _to_wav(s)
+
+
+static func _make_pop() -> AudioStreamWAV:
+	# Bright "pop" under the reveal chime: a fast downward chirp plus a tick of noise.
+	var n := int(RATE * 0.16)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 5
+	var ph := 0.0
+	for i in n:
+		var t := float(i) / RATE
+		ph += TAU * (420.0 + 1500.0 * exp(-t * 45.0)) / RATE
+		var tick := rng.randf_range(-1.0, 1.0) * exp(-t * 220.0) * 0.35
+		s[i] = (sin(ph) * exp(-t * 26.0) * 0.75 + tick) * minf(1.0, i / 20.0)
 	return _to_wav(s)
 
 
