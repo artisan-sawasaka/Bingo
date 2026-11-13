@@ -1,7 +1,9 @@
 extends Control
-## Every number 1..N, 10 per row (1-10, 11-20, ...). Drawn numbers are filled
-## with their ball color, the latest one pulses. When N is large the rows are
-## split into side-by-side blocks so the cells stay readable.
+## Every number 1..N, one row per tens digit (0-9, 10-19, 20-29, ...), so a
+## row is exactly one ball color (BallColors groups by the tens digit). The
+## first row starts with an empty cell where 0 would be. Drawn numbers are
+## filled with their ball color, the latest one pulses. When N is large the
+## rows are split into side-by-side blocks so the cells stay readable.
 ## Custom-drawn (one rect + one string per cell) so N up to 999 stays cheap.
 
 const BallColors = preload("res://scripts/util/ball_colors.gd")
@@ -38,9 +40,19 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 
+## Rows needed for 1..max: one per tens digit (75 -> 0-9 ... 70-79 = 8 rows).
+static func row_count(p_max: int) -> int:
+	return p_max / PER_ROW + 1 if p_max > 0 else 0
+
+
+## (column, row) of number n: column = ones digit, row = tens and above.
+static func cell_of(n: int) -> Vector2i:
+	return Vector2i(n % PER_ROW, n / PER_ROW)
+
+
 ## Returns { blocks, rows_per_block, cw, ch } maximizing the cell size.
 func layout() -> Dictionary:
-	var rows_total := int(ceil(float(max_number) / PER_ROW))
+	var rows_total := row_count(max_number)
 	var best := {"blocks": 1, "rows_per_block": rows_total, "cw": 1.0, "ch": 1.0}
 	var best_score := -1.0
 	for blocks in range(1, rows_total + 1):
@@ -68,12 +80,12 @@ func _draw() -> void:
 	var gap := clampf(minf(cw, ch) * 0.07, 1.0, 8.0)
 	var fs := int(clampf(minf(ch * 0.6, cw * 0.42), 8.0, 96.0))
 	# Center the whole grid vertically when cells were capped.
-	var used_h := ch * mini(rpb, int(ceil(float(max_number) / PER_ROW)))
+	var used_h := ch * mini(rpb, row_count(max_number))
 	var y0 := maxf(0.0, (size.y - used_h) * 0.5)
 	for n in range(1, max_number + 1):
-		var idx := n - 1
-		var row := idx / PER_ROW
-		var col := idx % PER_ROW
+		var cell := cell_of(n)
+		var row := cell.y
+		var col := cell.x
 		var block := row / rpb
 		var row_in_block := row % rpb
 		var origin := Vector2(block * (block_w + BLOCK_GAP), y0)

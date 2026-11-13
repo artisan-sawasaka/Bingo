@@ -172,7 +172,9 @@ func _show_number(n: int, animate: bool) -> void:
 		return
 	_number.text = str(n)
 	var col := BallColors.color_for(n, max_number)
-	_number.add_theme_color_override("font_color", col.lightened(0.25) if BallColors.band(n, max_number) != 2 else Color.WHITE)
+	# Same color as the ball, a bit lighter so the dark panel keeps it readable
+	# (even the darkest ones, blue / purple / brown, stay above 5:1).
+	_number.add_theme_color_override("font_color", col.lightened(0.25))
 	_letter.text = BallColors.letter_for(n, max_number)
 	_letter.add_theme_color_override("font_color", col.lightened(0.2))
 	_letter.modulate.a = 1.0

@@ -6,7 +6,7 @@
 ## 自動テストの実行方法
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1        # Godot 側 115件（SCRIPT ERROR も失敗扱い）
+powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1        # Godot 側 125件（SCRIPT ERROR も失敗扱い）
 node --test tests/web/lever_math.test.cjs                           # レバー計算・トークン解析・アドレスへのトークン保持・最大番号検証・テンキー・起動判定 13件
 node tools/verify_qr.mjs <qr_dump.json> <jsQR.js>                   # QR を独立デコーダ jsQR で復号（開発時のみ）
 ```
@@ -96,6 +96,7 @@ node tools/verify_qr.mjs <qr_dump.json> <jsQR.js>                   # QR を独�
 | 69 | 負荷：ドラムのシミュレーション 75 球 0.4 ms／300 球 1.6 ms／999 球 約 5 ms（1フレームあたり、ヘッドレス計測） | 計測スクリプト。画面込みの fps は未計測（#27） | PASS |
 | 74 | 起動時のQRが必ずつながらず「別のIP」が必要だった不具合：切断中の Wi-Fi が古い DHCP アドレス（Windows の「Deprecated」）を持ったままで、Wi-Fi 優先の順位付けによりそれが先頭になっていた。PC 名の名前解決で得られる使用中のアドレスを優先し、使われていないアドレスは最後に回して「未接続の可能性」と表示。接続画面を開くたびにアドレスを読み直す | unit `test_net_codec`（同じ構成を再現）+ 実機（Wi-Fi 切断・有線接続の PC）で接続画面を撮影し 192.168.3.4（イーサネット）が先頭になることを確認 | PASS |
 | 74b | **スマホ実機**で、起動直後の QR から「別のIP」なしで接続できる | — | NOT RUN |
+| 75 | 球の色は 10 の位ごとの 10 色（1〜9 青 … 90〜99 白、100 以上はくり返し）。最大番号によらず同じ色、隣り合う組の色が違う、番号一覧の文字がどの色でも読める（コントラスト 4:1 以上）、B〜O の文字はカードの列のまま。番号一覧の行も 10 の位ごと（1〜9 / 10〜19 / …）で 1 行が 1 色、最初の行は 0 の位置を空ける | unit `test_ball_colors` `test_number_board` + スクリーンショット目視（ドラム・外周・番号一覧 最大 99 / 75 / 999） | PASS |
 
 ## 手動確認手順（実機）
 
