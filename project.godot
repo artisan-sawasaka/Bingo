@@ -7,7 +7,7 @@ config_version=5
 
 config/name="Bingo Drum 3D"
 config/description="3D bingo drawing machine for TV with a smartphone lever remote."
-config/version="0.1.0"
+config/version="1.0.0"
 run/main_scene="res://scenes/main.tscn"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="BingoDrum3D"
